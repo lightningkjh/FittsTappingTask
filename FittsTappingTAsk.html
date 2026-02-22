@@ -320,7 +320,7 @@
         );
 
         ctx.textAlign = "right";
-        ctx.fillText("Exit & Save", logicalWidth - 20, logicalHeight - 40);
+        ctx.fillText("Exit & Save", logicalWidth - 20, 40);
 
         animationId = requestAnimationFrame(loop);
       }
@@ -332,7 +332,7 @@
         pointer_x = e.clientX || (e.touches ? e.touches[0].clientX : 0);
         pointer_y = e.clientY || (e.touches ? e.touches[0].clientY : 0);
 
-        if (pointer_x > logicalWidth - 150 && pointer_y > logicalHeight - 80) {
+        if (pointer_x > logicalWidth - 150 && pointer_y > 80) {
           running = false;
           downloadCSV();
           alert("실험이 중단되었습니다. 지금까지의 데이터를 저장합니다.");
@@ -449,3 +449,4 @@
     </script>
   </body>
 </html>
+
