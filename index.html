@@ -329,7 +329,7 @@
                 const dist_target = Math.hypot(pointer_x - right_pos.x, pointer_y - right_pos.y);
                 const w = full_sequence[current_idx].Width;
 
-                if (dist_target <= w * 2) {
+                if (pointer_x > logicalWidth / 2) {
                     const end_time = performance.now() / 1000;
                     
                     if (move_start_time === 0) move_start_time = beep_time; 
