@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Perceptual Judgement Task</title>
+    <style>
+        * {
+            -webkit-touch-callout: none; 
+            -webkit-user-select: none;   
+            user-select: none;
+            -webkit-tap-highlight-color: rgba(0,0,0,0); 
+        }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: white; 
+            touch-action: none; 
+            font-family: Arial, sans-serif;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        #startScreen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 20;
+        }
+        
+        #startBtn {
+            padding: 15px 40px;
+            font-size: 24px;
+            font-weight: bold;
+            background-color: #eb7d32;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            margin-top: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        #startBtn:active { background-color: #cc6a27; }
+
+        /* 하단 판단 버튼 컨테이너 (Judgement 단계에서만 보임) */
+        #btnContainer {
+            position: absolute;
+            bottom: 50px;
+            width: 100%;
+            display: none; /* 기본은 숨김 */
+            justify-content: center;
+            gap: 30px;
+            z-index: 10;
+        }
+
+        /* 시각적 인지에 방해되지 않도록 연한 회색으로 디자인 */
+        .judgementBtn {
+            padding: 20px 40px;
+            font-size: 24px;
+            font-weight: bold;
+            background-color: #E6E6E6;
+            color: #787878;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            transition: background-color 0.1s;
+        }
+        .judgementBtn:active {
+            background-color: #D2D2D2;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="startScreen">
+        <h1>Perceptual Judgement Task</h1>
+        <p style="color:#666; margin-bottom:30px;">iPad Pro - Perception Mode</p>
+        <button id="startBtn">실험 시작 (전체화면)</button>
+    </div>
+
+    <div id="btnContainer">
+        <button class="judgementBtn" data-val="Small">Small</button>
+        <button class="judgementBtn" data-val="Identical">Identical</button>
+        <button class="judgementBtn" data-val="Big">Big</button>
+    </div>
+
+    <canvas id="expCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('expCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('startScreen');
+        const startBtn = document.getElementById('startBtn');
+        const btnContainer = document.getElementById('btnContainer');
+        const judgementBtns = document.querySelectorAll('.judgementBtn');
+        
+        let logicalWidth = window.innerWidth;
+        let logicalHeight = window.innerHeight;
+        
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            
+            logicalWidth = window.innerWidth;
+            logicalHeight = window.innerHeight;
+            
+            canvas.width = logicalWidth * dpr;
+            canvas.height = logicalHeight * dpr;
+            
+            canvas.style.width = logicalWidth + 'px';
+            canvas.style.height = logicalHeight + 'px';
+            
+            ctx.resetTransform();
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        const COLOR_BG = "#FFFFFF";
+        const COLOR_TEXT = "#141414";
+        const COLOR_GREY = "#969696";
+        const COLOR_INDUCER = "#96A0AA";
+        const COLOR_COMMON = "#EB7D32";
+
+        const CSS_PIXELS_PER_CM = 52.0; 
+        const cm_to_px = (cm) => cm * CSS_PIXELS_PER_CM;
+
+        const DISTANCE_A_CM = 10;
+        const DISTANCE_A_PX = cm_to_px(DISTANCE_A_CM);
+
+        // 실험 조건
+        const ID_CONDITIONS = [2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5];
+        const ILLUSION_TYPES = ["Control", "Small_Version", "Big_Version"];
+        const REPETITIONS = 3; // 각 조건당 3회 반복
+        const PRACTICE_TRIALS_COUNT = 5; // 연습 5회
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        let main_sequence = [];
+        for (let illusion of ILLUSION_TYPES) {
+            for (let id_val of ID_CONDITIONS) {
+                let target_width_px = DISTANCE_A_PX / (Math.pow(2, id_val) - 1);
+                for (let i = 0; i < REPETITIONS; i++) {
+                    main_sequence.push({
+                        Type: "Main", Illusion: illusion, ID: id_val, 
+                        Width: target_width_px
+                    });
+                }
+            }
+        }
+        shuffle(main_sequence);
+
+        // 자바스크립트는 구조 분해 할당({ ...t })을 통해 안전하게 독립 복사됩니다.
+        let practice_sequence = main_sequence.slice(0, PRACTICE_TRIALS_COUNT).map(t => ({...t, Type: "Practice"}));
+        let full_sequence = practice_sequence.concat(main_sequence);
+        let results = [];
+
+        let running = false;
+        let current_idx = 0;
+        let is_practice_done = false;
+
+        const STATE_REST = 0;
+        const STATE_ITI = 1;
+        const STATE_FOREPERIOD = 2;
+        const STATE_JUDGEMENT = 3;
+
+        let state = STATE_REST;
+        let timer_start = 0;
+        let foreperiod_duration = 0;
+        let judgement_onset_time = 0;
+
+        function drawCircle(x, y, radius, color) {
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function drawTargets(cx, cy, width, illusion_type, is_target=false) {
+            const radius = width / 2;
+            if (is_target) {
+                if (illusion_type === "Small_Version") {
+                    const inducer_dia = width * 2.0;
+                    const dist_to_center = width * 2.12;
+                    for (let i = 0; i < 6; i++) {
+                        const rad = (Math.PI / 180) * (60 * i);
+                        const ix = cx + Math.cos(rad) * dist_to_center;
+                        const iy = cy + Math.sin(rad) * dist_to_center;
+                        drawCircle(ix, iy, inducer_dia / 2, COLOR_INDUCER);
+                    }
+                } else if (illusion_type === "Big_Version") {
+                    const inducer_dia = width * 0.46875;
+                    const dist_to_center = width * 0.83;
+                    for (let i = 0; i < 8; i++) {
+                        const rad = (Math.PI / 180) * (45 * i);
+                        const ix = cx + Math.cos(rad) * dist_to_center;
+                        const iy = cy + Math.sin(rad) * dist_to_center;
+                        drawCircle(ix, iy, inducer_dia / 2, COLOR_INDUCER);
+                    }
+                }
+            }
+            drawCircle(cx, cy, radius, COLOR_COMMON);
+        }
+
+        function drawText(text, y, size, color) {
+            ctx.fillStyle = color;
+            ctx.font = `${size}px Arial`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, logicalWidth / 2, y); 
+        }
+
+        let animationId;
+        function loop() {
+            if (!running) return;
+
+            if (current_idx >= full_sequence.length) {
+                running = false;
+                downloadCSV();
+                alert("모든 판단 과제가 종료되었습니다. 데이터를 다운로드합니다.");
+                return;
+            }
+
+            const curr = full_sequence[current_idx];
+            const w = curr.Width;
+            const cx = logicalWidth / 2;
+            const cy = logicalHeight / 2;
+            const left_pos = { x: cx - DISTANCE_A_PX / 2, y: cy };
+            const right_pos = { x: cx + DISTANCE_A_PX / 2, y: cy };
+
+            if (curr.Type === "Main" && !is_practice_done) {
+                state = STATE_REST;
+                is_practice_done = true;
+            }
+
+            const now = performance.now() / 1000;
+
+            // 타이머 로직
+            if (state === STATE_ITI) {
+                btnContainer.style.display = 'none'; // 버튼 숨김
+                if (now - timer_start >= 0.5) { // 0.5초 대기
+                    state = STATE_FOREPERIOD;
+                    timer_start = now;
+                    foreperiod_duration = 2.0 + Math.random() * 1.0; // 2~3초
+                }
+            } else if (state === STATE_FOREPERIOD) {
+                if (now - timer_start >= foreperiod_duration) {
+                    state = STATE_JUDGEMENT;
+                    judgement_onset_time = now;
+                    btnContainer.style.display = 'flex'; // 버튼 등장
+                }
+            }
+
+            ctx.fillStyle = COLOR_BG;
+            ctx.fillRect(0, 0, logicalWidth, logicalHeight); 
+
+            if (curr.Type === "Practice" && state !== STATE_REST) {
+                drawText("[ PRACTICE MODE ]", 80, 24, COLOR_GREY);
+            }
+
+            if (state === STATE_REST) {
+                btnContainer.style.display = 'none';
+                drawText(is_practice_done ? "Practice Finished." : "Perceptual Judgement Task", cy - 40, 32, COLOR_TEXT);
+                drawText("Tap anywhere to start next session.", cy + 20, 24, COLOR_GREY);
+            } else if (state === STATE_FOREPERIOD) {
+                // 2~3초 동안 왼쪽 기준원만 표시
+                drawTargets(left_pos.x, left_pos.y, w, "Control", false);
+            } else if (state === STATE_JUDGEMENT) {
+                // 판단 단계: 양쪽 모두 표시
+                drawTargets(left_pos.x, left_pos.y, w, "Control", false);
+                drawTargets(right_pos.x, right_pos.y, w, curr.Illusion, true);
+            }
+
+            // 하단 정보 텍스트 (버튼과 겹치지 않도록 높이 조절)
+            const mode_text = curr.Type === "Practice" ? "PRACTICE" : "MAIN EXP";
+            ctx.fillStyle = COLOR_GREY;
+            ctx.font = "20px Arial";
+            ctx.textBaseline = "middle";
+            ctx.textAlign = "left";
+            ctx.fillText(`${mode_text} - Trial: ${current_idx + 1} / ${full_sequence.length}`, 20, 40);
+
+            // 우측 상단 종료 버튼
+            ctx.textAlign = "right";
+            ctx.fillText("Exit & Save", logicalWidth - 20, 40);
+
+            animationId = requestAnimationFrame(loop);
+        }
+
+        // 터치/클릭 이벤트 (상태 전환 및 우측 상단 종료)
+        function handleInteraction(e) {
+            if(e.cancelable && e.type !== 'click') e.preventDefault(); 
+            if (!running) return;
+
+            let pointer_x = e.clientX || (e.touches && e.touches.length > 0 ? e.touches[0].clientX : 0);
+            let pointer_y = e.clientY || (e.touches && e.touches.length > 0 ? e.touches[0].clientY : 0);
+
+            // 우측 상단 Exit & Save 처리
+            if (pointer_x > logicalWidth - 150 && pointer_y < 80) {
+                running = false; 
+                btnContainer.style.display = 'none';
+                downloadCSV();   
+                alert("실험이 중단되었습니다. 지금까지의 데이터를 저장합니다.");
+                
+                ctx.fillStyle = COLOR_BG;
+                ctx.fillRect(0, 0, logicalWidth, logicalHeight);
+                startScreen.style.display = 'flex';
+                return;
+            }
+
+            // REST 상태에서 화면 터치 시 ITI로 넘어가며 세션 시작
+            if (state === STATE_REST) {
+                state = STATE_ITI;
+                timer_start = performance.now() / 1000;
+            }
+        }
+
+        window.addEventListener('pointerdown', handleInteraction, { passive: false });
+
+        // 하단 판단 버튼 클릭 이벤트 처리
+        judgementBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation(); // 버튼 클릭 시 캔버스 터치 이벤트로 전파되는 것 방지
+                
+                if (state === STATE_JUDGEMENT) {
+                    const now = performance.now() / 1000;
+                    let rt_sec = now - judgement_onset_time;
+                    let response_val = e.target.getAttribute('data-val');
+                    
+                    const curr = full_sequence[current_idx];
+
+                    if (curr.Type === "Main") {
+                        results.push({
+                            Trial_Idx: current_idx + 1 - PRACTICE_TRIALS_COUNT,
+                            Illusion: curr.Illusion,
+                            ID: curr.ID,
+                            Width_Px: Math.round(curr.Width * 10) / 10,
+                            Response: response_val,
+                            Decision_Time_ms: Math.round(rt_sec * 1000 * 100) / 100
+                        });
+                    }
+
+                    current_idx++;
+                    state = STATE_ITI; // 다음 시행 준비 (0.5초 대기)
+                    timer_start = now;
+                }
+            });
+        });
+
+        startBtn.addEventListener('click', () => {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(err => console.log(err));
+            } else if (document.documentElement.webkitRequestFullscreen) {
+                document.documentElement.webkitRequestFullscreen();
+            }
+
+            startScreen.style.display = 'none';
+            running = true;
+            resizeCanvas(); 
+            loop(); 
+        });
+
+        function downloadCSV() {
+            if (results.length === 0) return;
+            
+            const keys = Object.keys(results[0]);
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF" + keys.join(",") + "\n";
+            
+            results.forEach(row => {
+                csvContent += keys.map(k => row[k]).join(",") + "\n";
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            
+            const date = new Date();
+            const timeStr = `${date.getFullYear()}${(date.getMonth()+1).toString().padStart(2,'0')}${date.getDate().toString().padStart(2,'0')}_${date.getHours().toString().padStart(2,'0')}${date.getMinutes().toString().padStart(2,'0')}`;
+            link.setAttribute("download", `judgement_ipad_result_${timeStr}.csv`);
+            
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
